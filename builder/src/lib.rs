@@ -1,13 +1,14 @@
-use proc_macro::{Span, TokenStream};
+use proc_macro::Span;
+use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput, Ident};
+use syn::{parse_macro_input, Data, DeriveInput, Ident};
 
 #[proc_macro_derive(Builder)]
-pub fn derive(input: TokenStream) -> TokenStream {
+pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 
     let name = input.ident;
-    let builder_name = Ident::new(
+    let b_name = Ident::new(
         format!("{}Builder", name).as_str(),
         Span::call_site().into(),
     );
@@ -17,7 +18,32 @@ pub fn derive(input: TokenStream) -> TokenStream {
         _ => unimplemented!(),
     };
 
-    let builder_fields = match &input.data {
+    let b_fields = builder_fields(&input.data);
+    let b_setters = builder_setters(&input.data);
+
+    let expanded = quote! {
+        impl #name {
+            fn builder() -> #b_name {
+                #b_name {
+                    #(#members: None,)*
+                }
+            }
+        }
+
+        pub struct #b_name {
+            #(#b_fields)*
+        }
+
+        impl #b_name {
+            #(#b_setters)*
+        }
+    };
+
+    proc_macro::TokenStream::from(expanded)
+}
+
+fn builder_fields(data: &Data) -> impl Iterator<Item = TokenStream> + '_ {
+    match data {
         syn::Data::Struct(data) => data.fields.iter().map(|f| {
             let ident = &f.ident.clone().expect("field has no identifier");
             let ty = &f.ty;
@@ -26,21 +52,21 @@ pub fn derive(input: TokenStream) -> TokenStream {
             }
         }),
         _ => unimplemented!(),
-    };
+    }
+}
 
-    let expanded = quote! {
-        impl #name {
-            fn builder() -> #builder_name {
-                #builder_name {
-                    #(#members: None,)*
+fn builder_setters(data: &Data) -> impl Iterator<Item = TokenStream> + '_ {
+    match data {
+        syn::Data::Struct(data) => data.fields.iter().map(|f| {
+            let ident = &f.ident.clone().expect("field has no identifier");
+            let ty = &f.ty;
+            quote! {
+                fn #ident(&mut self, #ident: #ty) -> &mut Self {
+                    self.#ident = Some(#ident);
+                    self
                 }
             }
-        }
-
-        pub struct #builder_name {
-            #(#builder_fields)*
-        }
-    };
-
-    proc_macro::TokenStream::from(expanded)
+        }),
+        _ => unimplemented!(),
+    }
 }
