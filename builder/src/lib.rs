@@ -14,12 +14,14 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     );
 
     let members = match &input.data {
-        syn::Data::Struct(data) => data.fields.members(),
+        Data::Struct(data) => data.fields.members(),
         _ => unimplemented!(),
     };
 
     let b_fields = builder_fields(&input.data);
     let b_setters = builder_setters(&input.data);
+    let b_checks = builder_checks(&input.data);
+    let output = output(&input.data);
 
     let expanded = quote! {
         impl #name {
@@ -36,6 +38,15 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
         impl #b_name {
             #(#b_setters)*
+
+            pub fn build(&mut self) -> Result<#name, Box<dyn std::error::Error>> {
+                #(#b_checks)*
+                Ok(
+                    #name {
+                        #(#output),*
+                    }
+                )
+            }
         }
     };
 
@@ -69,4 +80,37 @@ fn builder_setters(data: &Data) -> impl Iterator<Item = TokenStream> + '_ {
         }),
         _ => unimplemented!(),
     }
+}
+
+fn builder_checks(data: &Data) -> impl Iterator<Item = TokenStream> + '_ {
+    let syn::Data::Struct(data) = data else {
+        unimplemented!();
+    };
+
+    data.fields.members().map(|f| match f {
+        syn::Member::Named(ident) => {
+            let err_msg = format!("field `{ident}` must be specified");
+            quote! {
+                if self.#ident.is_none() {
+                    return Err(#err_msg.into());
+                }
+            }
+        }
+        _ => unimplemented!(),
+    })
+}
+
+fn output(data: &Data) -> impl Iterator<Item = TokenStream> + '_ {
+    let syn::Data::Struct(data) = data else {
+        unimplemented!();
+    };
+
+    data.fields.members().map(|f| match f {
+        syn::Member::Named(ident) => {
+            quote! {
+                #ident: self.#ident.clone().unwrap()
+            }
+        }
+        _ => unimplemented!(),
+    })
 }
